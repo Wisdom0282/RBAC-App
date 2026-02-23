@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RBAC Governance Engine</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600&family=Syne:wght@600;700;800&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; background: #0a0c10; }
+  ::-webkit-scrollbar { width: 4px; height: 4px; }
+  ::-webkit-scrollbar-track { background: #0d1117; }
+  ::-webkit-scrollbar-thumb { background: #2d333b; border-radius: 2px; }
+  .tab-btn { background: none; border: none; cursor: pointer; font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; padding: 8px 16px; transition: all 0.15s; }
+  .tab-btn.active { color: #58a6ff; border-bottom: 2px solid #58a6ff; }
+  .tab-btn:not(.active) { color: #6e7681; border-bottom: 2px solid transparent; }
+  .tab-btn:hover:not(.active) { color: #8b949e; }
+  .cell-btn { width: 28px; height: 28px; border: 1px solid; border-radius: 3px; cursor: pointer; font-size: 9px; font-family: 'IBM Plex Mono', monospace; transition: all 0.1s; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .cell-btn.on  { background: #0d2a4a; border-color: #1f6feb; color: #58a6ff; }
+  .cell-btn.off { background: #13151a; border-color: #21262d; color: #3d444d; }
+  .cell-btn.on:hover  { background: #1a3a5c; }
+  .cell-btn.off:hover { border-color: #3d444d; color: #6e7681; }
+  .save-btn { background: #1f6feb; border: none; color: #fff; font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: 0.1em; padding: 7px 18px; border-radius: 4px; cursor: pointer; transition: all 0.15s; white-space: nowrap; }
+  .save-btn:hover { background: #388bfd; }
+  .save-btn.flash { background: #238636; }
+  .log-row { border-bottom: 1px solid #161b22; transition: background 0.1s; cursor: pointer; }
+  .log-row:hover { background: #161b22; }
+  .log-row.expanded { background: #161b22; }
+  .badge { font-size: 9px; padding: 2px 6px; border-radius: 2px; font-family: 'IBM Plex Mono', monospace; letter-spacing: 0.06em; text-transform: uppercase; border: 1px solid; }
+  .badge-low      { background: #0d2b1e; color: #4ade80; border-color: #166534; }
+  .badge-medium   { background: #2d1b00; color: #fbbf24; border-color: #92400e; }
+  .badge-high     { background: #2d1000; color: #fb923c; border-color: #9a3412; }
+  .badge-critical { background: #2d0000; color: #f87171; border-color: #7f1d1d; }
+  .org-select  { background: #161b22; border: 1px solid #30363d; color: #c9d1d9; font-family: 'IBM Plex Mono', monospace; font-size: 11px; padding: 6px 10px; border-radius: 4px; cursor: pointer; outline: none; }
+  .filter-btn  { background: none; border: 1px solid #21262d; font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.08em; padding: 4px 10px; border-radius: 3px; cursor: pointer; transition: all 0.1s; }
+  .filter-btn.active { border-color: #58a6ff; color: #58a6ff; background: #0d2a4a; }
+  .filter-btn:not(.active) { color: #6e7681; }
+  .search-input { background: #161b22; border: 1px solid #30363d; color: #c9d1d9; font-family: 'IBM Plex Mono', monospace; font-size: 11px; padding: 6px 12px; border-radius: 4px; outline: none; width: 200px; }
+  .search-input::placeholder { color: #3d444d; }
+  .search-input:focus { border-color: #58a6ff; }
+  .act-btn { font-size: 10px; background: #161b22; border: 1px solid #30363d; color: #8b949e; padding: 5px 12px; border-radius: 3px; cursor: pointer; font-family: 'IBM Plex Mono', monospace; }
+  .act-btn-danger { font-size: 10px; background: #3d0c0c; border: 1px solid #6e1313; color: #ff7b72; padding: 5px 12px; border-radius: 3px; cursor: pointer; font-family: 'IBM Plex Mono', monospace; }
+  table { border-collapse: collapse; width: 100%; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState } = React;
+
+const ROLES     = ["Super Admin","Org Admin","Manager","Developer","Viewer","Billing"];
+const RESOURCES = ["Users","Projects","Billing","APIs","Reports","Audit Logs","Integrations","Settings"];
+const ACTIONS   = ["create","read","update","delete","export"];
+
+const ORGS = [
+  { id:1, name:"Acme Corp",   seats:1240, plan:"Enterprise" },
+  { id:2, name:"Globex Inc",  seats:870,  plan:"Business"   },
+  { id:3, name:"Initech LLC", seats:2100, plan:"Enterprise" },
+];
+
+const DEFAULT_MATRIX = {
+  "Super Admin": { Users:["create","read","update","delete","export"], Projects:["create","read","update","delete","export"], Billing:["create","read","update","delete","export"], APIs:["create","read","update","delete","export"], Reports:["create","read","update","delete","export"], "Audit Logs":["read","export"], Integrations:["create","read","update","delete","export"], Settings:["create","read","update","delete","export"] },
+  "Org Admin":   { Users:["create","read","update","delete"], Projects:["create","read","update","delete","export"], Billing:["read","update"], APIs:["create","read","update","delete"], Reports:["create","read","update","export"], "Audit Logs":["read"], Integrations:["create","read","update"], Settings:["read","update"] },
+  "Manager":     { Users:["read","update"], Projects:["create","read","update","export"], Billing:["read"], APIs:["read"], Reports:["create","read","export"], "Audit Logs":[], Integrations:["read"], Settings:["read"] },
+  "Developer":   { Users:["read"], Projects:["create","read","update"], Billing:[], APIs:["create","read","update","delete"], Reports:["read"], "Audit Logs":[], Integrations:["create","read","update"], Settings:["read"] },
+  "Viewer":      { Users:["read"], Projects:["read"], Billing:[], APIs:["read"], Reports:["read"], "Audit Logs":[], Integrations:["read"], Settings:[] },
+  "Billing":     { Users:[], Projects:[], Billing:["create","read","update","delete","export"], APIs:[], Reports:["read","export"], "Audit Logs":[], Integrations:[], Settings:["read"] },
+};
+
+const AUDIT_LOGS = [
+  { id:"EVT-9821", ts:"2025-02-22 14:32:01", actor:"james.wu@acme.com",     action:"PERMISSION_UPDATED", resource:"Role: Developer",           org:"Acme Corp",   severity:"medium"   , ip:"104.21.33.12"  },
+  { id:"EVT-9820", ts:"2025-02-22 14:28:44", actor:"system",                action:"BULK_IMPORT",        resource:"Users (412)",                org:"Initech LLC", severity:"high"     , ip:"—"             },
+  { id:"EVT-9819", ts:"2025-02-22 13:55:10", actor:"priya.nair@globex.io",  action:"ROLE_ASSIGNED",      resource:"User: t.chen",               org:"Globex Inc",  severity:"low"      , ip:"198.51.100.7"  },
+  { id:"EVT-9818", ts:"2025-02-22 13:40:22", actor:"admin@acme.com",        action:"USER_SUSPENDED",     resource:"User: r.moore",              org:"Acme Corp",   severity:"high"     , ip:"192.0.2.44"    },
+  { id:"EVT-9817", ts:"2025-02-22 13:15:09", actor:"james.wu@acme.com",     action:"API_KEY_REVOKED",    resource:"Integration: Salesforce",    org:"Acme Corp",   severity:"critical" , ip:"104.21.33.12"  },
+  { id:"EVT-9816", ts:"2025-02-22 12:58:33", actor:"lisa.park@initech.co",  action:"EXPORT_TRIGGERED",   resource:"Report: Q4 Revenue",         org:"Initech LLC", severity:"medium"   , ip:"203.0.113.55"  },
+  { id:"EVT-9815", ts:"2025-02-22 12:30:00", actor:"system",                action:"SSO_CONFIG_CHANGED", resource:"Settings: SAML",             org:"Globex Inc",  severity:"critical" , ip:"—"             },
+  { id:"EVT-9814", ts:"2025-02-22 11:45:18", actor:"priya.nair@globex.io",  action:"SEAT_LIMIT_REACHED", resource:"Org: Globex Inc",            org:"Globex Inc",  severity:"medium"   , ip:"—"             },
+];
+
+const ROLE_COLORS = {
+  "Super Admin":"#da3633","Org Admin":"#db6d28","Manager":"#d29922",
+  "Developer":"#2f81f7","Viewer":"#3fb950","Billing":"#8957e5",
+};
+
+const SEAT_DATA = [
+  { role:"Super Admin", seats:4,   pct:0.3  },
+  { role:"Org Admin",   seats:18,  pct:1.5  },
+  { role:"Manager",     seats:95,  pct:7.7  },
+  { role:"Developer",   seats:432, pct:34.8 },
+  { role:"Viewer",      seats:621, pct:50.1 },
+  { role:"Billing",     seats:70,  pct:5.6  },
+];
+
+function App() {
+  const [tab,         setTab]         = useState("matrix");
+  const [matrix,      setMatrix]      = useState(DEFAULT_MATRIX);
+  const [org,         setOrg]         = useState(ORGS[0]);
+  const [logFilter,   setLogFilter]   = useState("all");
+  const [search,      setSearch]      = useState("");
+  const [unsaved,     setUnsaved]     = useState(false);
+  const [saveFlash,   setSaveFlash]   = useState(false);
+  const [expandedRow, setExpandedRow] = useState(null);
+
+  const togglePerm = (role, resource, action) => {
+    setMatrix(prev => {
+      const cur  = prev[role][resource] || [];
+      const next = cur.includes(action) ? cur.filter(a => a !== action) : [...cur, action];
+      return { ...prev, [role]: { ...prev[role], [resource]: next } };
+    });
+    setUnsaved(true);
+  };
+
+  const handleSave = () => {
+    setUnsaved(false);
+    setSaveFlash(true);
+    setTimeout(() => setSaveFlash(false), 2000);
+  };
+
+  const filteredLogs = AUDIT_LOGS
+    .filter(l => logFilter === "all" || l.severity === logFilter)
+    .filter(l => !search || [l.id,l.actor,l.action,l.resource,l.org].join(" ").toLowerCase().includes(search.toLowerCase()));
+
+  const totalPerms = Object.values(matrix).reduce((s,r)=>s+Object.values(r).flat().length,0);
+
+  return (
+    <div style={{ fontFamily:"'IBM Plex Mono',monospace", background:"#0a0c10", minHeight:"100vh", color:"#c9d1d9" }}>
+
+      {/* ── HEADER ── */}
+      <div style={{ borderBottom:"1px solid #21262d", padding:"0 24px" }}>
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", paddingTop:14, paddingBottom:8 }}>
+          <div style={{ display:"flex", alignItems:"baseline", gap:10 }}>
+            <span style={{ fontFamily:"'Syne',sans-serif", fontSize:17, fontWeight:800, color:"#f0f6fc", letterSpacing:"-0.02em" }}>RBAC</span>
+            <span style={{ fontFamily:"'Syne',sans-serif", fontSize:17, fontWeight:600, color:"#58a6ff", letterSpacing:"-0.02em" }}>Governance</span>
+            <span style={{ fontSize:9, color:"#3d444d", letterSpacing:"0.1em", marginLeft:4 }}>// ENGINE v2.1</span>
+          </div>
+          <div style={{ display:"flex", alignItems:"center", gap:12 }}>
+            <select className="org-select" value={org.id} onChange={e => setOrg(ORGS.find(o => o.id === parseInt(e.target.value)))}>
+              {ORGS.map(o => <option key={o.id} value={o.id}>{o.name} — {o.seats.toLocaleString()} seats</option>)}
+            </select>
+            <div style={{ display:"flex", alignItems:"center", gap:5 }}>
+              <div style={{ width:6, height:6, borderRadius:"50%", background:"#238636" }}></div>
+              <span style={{ fontSize:10, color:"#6e7681", letterSpacing:"0.05em" }}>{org.plan}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Stats strip */}
+        <div style={{ display:"flex", gap:20, paddingBottom:12, marginTop:2 }}>
+          {[
+            { label:"Total Seats",    val: org.seats.toLocaleString(), sub:"licensed"   },
+            { label:"Active Roles",   val: "6",                         sub:"configured" },
+            { label:"Permissions",    val: totalPerms,                  sub:"defined"    },
+            { label:"Audit Events",   val: "9,821",                     sub:"last 30d"   },
+            { label:"Policy Changes", val: unsaved ? "1 pending" : "23", sub: unsaved ? "unsaved" : "this week" },
+          ].map(s => (
+            <div key={s.label} style={{ borderLeft:"2px solid #21262d", paddingLeft:10 }}>
+              <div style={{ fontSize:14, fontWeight:600, color: s.label==="Policy Changes" && unsaved ? "#d29922" : "#f0f6fc", fontFamily:"'Syne',sans-serif" }}>{s.val}</div>
+              <div style={{ fontSize:8, color:"#6e7681", letterSpacing:"0.1em", textTransform:"uppercase" }}>{s.label} / {s.sub}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* Tabs */}
+        <div style={{ display:"flex", gap:2, marginTop:-1 }}>
+          {[["matrix","Permission Matrix"],["audit","Audit Log"],["roles","Role Overview"]].map(([id,label]) => (
+            <button key={id} className={`tab-btn ${tab===id?"active":""}`} onClick={() => setTab(id)}>{label}</button>
+          ))}
+        </div>
+      </div>
+
+      {/* ── BODY ── */}
+      <div style={{ padding:"20px 24px" }}>
+
+        {/* ────── MATRIX ────── */}
+        {tab === "matrix" && (
+          <div>
+            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:16 }}>
+              <div>
+                <div style={{ fontFamily:"'Syne',sans-serif", fontSize:12, fontWeight:700, color:"#f0f6fc" }}>Permission Matrix</div>
+                <div style={{ fontSize:9, color:"#6e7681", marginTop:2, letterSpacing:"0.05em" }}>Toggle capabilities per role × resource. Changes tracked in audit log.</div>
+              </div>
+              <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+                {unsaved && <span style={{ fontSize:9, color:"#d29922", letterSpacing:"0.05em" }}>● unsaved changes</span>}
+                <button className={`save-btn ${saveFlash?"flash":""}`} onClick={handleSave}>
+                  {saveFlash ? "✓ SAVED" : "PUBLISH CHANGES"}
+                </button>
+              </div>
+            </div>
+
+            <div style={{ overflowX:"auto" }}>
+              <table>
+                <thead>
+                  <tr>
+                    <th style={{ width:120, textAlign:"left", padding:"7px 10px", fontSize:8, color:"#6e7681", letterSpacing:"0.12em", textTransform:"uppercase", borderBottom:"1px solid #21262d", fontWeight:400 }}>Resource</th>
+                    {ROLES.map(role => (
+                      <th key={role} style={{ textAlign:"center", padding:"7px 6px", borderBottom:"1px solid #21262d", minWidth:150 }}>
+                        <div style={{ fontSize:9, color:"#c9d1d9", fontWeight:600, letterSpacing:"0.05em", marginBottom:4 }}>{role}</div>
+                        <div style={{ display:"flex", gap:2, justifyContent:"center" }}>
+                          {ACTIONS.map(a => (
+                            <div key={a} style={{ fontSize:7, color:"#3d444d", width:28, textAlign:"center", textTransform:"uppercase" }}>{a.slice(0,3)}</div>
+                          ))}
+                        </div>
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {RESOURCES.map((res, ri) => (
+                    <tr key={res} style={{ borderBottom:"1px solid #161b22", background: ri%2===0 ? "#0a0c10" : "#0d1117" }}>
+                      <td style={{ padding:"9px 10px" }}>
+                        <div style={{ fontSize:10, color:"#e6edf3", fontWeight:500 }}>{res}</div>
+                      </td>
+                      {ROLES.map(role => (
+                        <td key={role} style={{ padding:"9px 6px", textAlign:"center" }}>
+                          <div style={{ display:"flex", gap:2, justifyContent:"center" }}>
+                            {ACTIONS.map(action => {
+                              const on = (matrix[role][res]||[]).includes(action);
+                              return (
+                                <button
+                                  key={action}
+                                  className={`cell-btn ${on?"on":"off"}`}
+                                  onClick={() => togglePerm(role, res, action)}
+                                  title={`${role} → ${res} → ${action}`}
+                                >
+                                  {on ? "✓" : "·"}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div style={{ marginTop:12, display:"flex", gap:16, alignItems:"center" }}>
+              <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+                <div style={{ width:12, height:12, background:"#0d2a4a", border:"1px solid #1f6feb", borderRadius:2, display:"flex", alignItems:"center", justifyContent:"center" }}>
+                  <span style={{ fontSize:7, color:"#58a6ff" }}>✓</span>
+                </div>
+                <span style={{ fontSize:9, color:"#6e7681" }}>Allowed</span>
+              </div>
+              <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+                <div style={{ width:12, height:12, background:"#13151a", border:"1px solid #21262d", borderRadius:2 }}></div>
+                <span style={{ fontSize:9, color:"#6e7681" }}>Denied</span>
+              </div>
+              <span style={{ marginLeft:"auto", fontSize:9, color:"#3d444d" }}>CRE · REA · UPD · DEL · EXP</span>
+            </div>
+          </div>
+        )}
+
+        {/* ────── AUDIT LOG ────── */}
+        {tab === "audit" && (
+          <div>
+            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:16, flexWrap:"wrap", gap:10 }}>
+              <div>
+                <div style={{ fontFamily:"'Syne',sans-serif", fontSize:12, fontWeight:700, color:"#f0f6fc" }}>Audit Log</div>
+                <div style={{ fontSize:9, color:"#6e7681", marginTop:2 }}>Immutable event stream · All times UTC</div>
+              </div>
+              <div style={{ display:"flex", gap:6, alignItems:"center", flexWrap:"wrap" }}>
+                {["all","critical","high","medium","low"].map(f => (
+                  <button key={f} className={`filter-btn ${logFilter===f?"active":""}`} onClick={() => setLogFilter(f)}>{f}</button>
+                ))}
+                <input
+                  className="search-input"
+                  placeholder="Search events..."
+                  value={search}
+                  onChange={e => setSearch(e.target.value)}
+                  style={{ marginLeft:6 }}
+                />
+              </div>
+            </div>
+
+            <div style={{ border:"1px solid #21262d", borderRadius:6, overflow:"hidden" }}>
+              <table>
+                <thead>
+                  <tr style={{ background:"#0d1117" }}>
+                    {["Event ID","Timestamp","Actor","Action","Resource","Org","Severity","IP"].map(h => (
+                      <th key={h} style={{ padding:"9px 12px", textAlign:"left", fontSize:8, color:"#6e7681", letterSpacing:"0.12em", textTransform:"uppercase", borderBottom:"1px solid #21262d", fontWeight:400, whiteSpace:"nowrap" }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredLogs.length === 0 && (
+                    <tr><td colSpan={8} style={{ padding:"32px", textAlign:"center", color:"#3d444d", fontSize:11 }}>No events match filter</td></tr>
+                  )}
+                  {filteredLogs.map(log => (
+                    <React.Fragment key={log.id}>
+                      <tr
+                        className={`log-row ${expandedRow===log.id?"expanded":""}`}
+                        onClick={() => setExpandedRow(expandedRow===log.id ? null : log.id)}
+                      >
+                        <td style={{ padding:"10px 12px", fontSize:10, color:"#58a6ff", fontWeight:500, whiteSpace:"nowrap" }}>{log.id}</td>
+                        <td style={{ padding:"10px 12px", fontSize:9,  color:"#8b949e",  whiteSpace:"nowrap" }}>{log.ts}</td>
+                        <td style={{ padding:"10px 12px", fontSize:9,  color: log.actor==="system" ? "#d29922" : "#e6edf3", whiteSpace:"nowrap" }}>{log.actor}</td>
+                        <td style={{ padding:"10px 12px", fontSize:9,  color:"#c9d1d9",  fontWeight:500, letterSpacing:"0.03em", whiteSpace:"nowrap" }}>{log.action}</td>
+                        <td style={{ padding:"10px 12px", fontSize:9,  color:"#8b949e" }}>{log.resource}</td>
+                        <td style={{ padding:"10px 12px", fontSize:9,  color:"#6e7681",  whiteSpace:"nowrap" }}>{log.org}</td>
+                        <td style={{ padding:"10px 12px" }}>
+                          <span className={`badge badge-${log.severity}`}>{log.severity}</span>
+                        </td>
+                        <td style={{ padding:"10px 12px", fontSize:9, color:"#6e7681", fontFamily:"'IBM Plex Mono'", whiteSpace:"nowrap" }}>{log.ip}</td>
+                      </tr>
+
+                      {expandedRow === log.id && (
+                        <tr style={{ background:"#0d1117" }}>
+                          <td colSpan={8} style={{ padding:"16px 18px", borderBottom:"1px solid #21262d" }}>
+                            <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:16, marginBottom:14 }}>
+                              {[
+                                ["Event ID",        log.id],
+                                ["Full Timestamp",   log.ts + " UTC"],
+                                ["Org",              log.org],
+                                ["IP Address",       log.ip],
+                                ["Actor",            log.actor],
+                                ["Action",           log.action],
+                                ["Resource",         log.resource],
+                                ["Severity",         log.severity.toUpperCase()],
+                              ].map(([k,v]) => (
+                                <div key={k}>
+                                  <div style={{ fontSize:8, color:"#6e7681", letterSpacing:"0.1em", textTransform:"uppercase", marginBottom:3 }}>{k}</div>
+                                  <div style={{ fontSize:10, color:"#e6edf3" }}>{v}</div>
+                                </div>
+                              ))}
+                            </div>
+                            <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+                              <button className="act-btn">Export JSON</button>
+                              <button className="act-btn">View Related Events</button>
+                              {["high","critical"].includes(log.severity) && (
+                                <button className="act-btn-danger">Flag for Review</button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div style={{ display:"flex", justifyContent:"space-between", marginTop:10, alignItems:"center" }}>
+              <span style={{ fontSize:9, color:"#6e7681" }}>Showing {filteredLogs.length} of 9,821 events</span>
+              <div style={{ display:"flex", gap:6 }}>
+                {["← Prev","1","2","3","...","490","Next →"].map(p => (
+                  <button key={p} style={{ fontSize:9, background: p==="1" ? "#1f6feb" : "none", border:"1px solid #30363d", color: p==="1" ? "#fff" : "#6e7681", padding:"3px 9px", borderRadius:3, cursor:"pointer", fontFamily:"'IBM Plex Mono'" }}>{p}</button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ────── ROLE OVERVIEW ────── */}
+        {tab === "roles" && (
+          <div>
+            <div style={{ marginBottom:16 }}>
+              <div style={{ fontFamily:"'Syne',sans-serif", fontSize:12, fontWeight:700, color:"#f0f6fc" }}>Role Overview</div>
+              <div style={{ fontSize:9, color:"#6e7681", marginTop:2 }}>Seat distribution and permission summary across all roles.</div>
+            </div>
+
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:10, marginBottom:20 }}>
+              {SEAT_DATA.map(({ role, seats, pct }) => {
+                const color     = ROLE_COLORS[role];
+                const permCount = Object.values(matrix[role]).flat().length;
+                return (
+                  <div key={role} style={{ background:"#0d1117", border:"1px solid #21262d", borderRadius:6, padding:"16px 18px", borderLeft:`3px solid ${color}` }}>
+                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:10 }}>
+                      <div>
+                        <div style={{ fontFamily:"'Syne',sans-serif", fontSize:11, fontWeight:700, color:"#e6edf3" }}>{role}</div>
+                        <div style={{ fontSize:8, color:"#6e7681", marginTop:2, letterSpacing:"0.08em", textTransform:"uppercase" }}>{seats.toLocaleString()} seats · {pct}%</div>
+                      </div>
+                      <div style={{ textAlign:"right" }}>
+                        <div style={{ fontSize:20, fontWeight:600, color, fontFamily:"'Syne'" }}>{permCount}</div>
+                        <div style={{ fontSize:8, color:"#6e7681" }}>permissions</div>
+                      </div>
+                    </div>
+                    <div style={{ background:"#161b22", borderRadius:2, height:3, overflow:"hidden", marginBottom:10 }}>
+                      <div style={{ background:color, height:"100%", width:`${Math.min(pct*2,100)}%`, opacity:0.7 }}></div>
+                    </div>
+                    <div style={{ display:"flex", flexWrap:"wrap", gap:3 }}>
+                      {RESOURCES.map(res => {
+                        const count = (matrix[role][res]||[]).length;
+                        return (
+                          <span key={res} style={{ fontSize:8, padding:"2px 5px", borderRadius:2, background: count>0 ? "#161b22" : "transparent", border:`1px solid ${count>0?"#30363d":"#161b22"}`, color: count>0 ? "#8b949e" : "#3d444d", letterSpacing:"0.04em" }}>
+                            {res} <span style={{ color: count>0 ? color : "#3d444d", opacity:0.8 }}>{count}</span>
+                          </span>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Seat distribution bar */}
+            <div style={{ background:"#0d1117", border:"1px solid #21262d", borderRadius:6, padding:"14px 18px" }}>
+              <div style={{ fontSize:9, color:"#6e7681", letterSpacing:"0.1em", textTransform:"uppercase", marginBottom:10 }}>Seat Distribution — {org.seats.toLocaleString()} total</div>
+              <div style={{ display:"flex", height:18, borderRadius:3, overflow:"hidden", gap:1 }}>
+                {SEAT_DATA.map(({ role, pct }) => (
+                  <div key={role} title={`${role}: ${pct}%`} style={{ flex:pct, background:ROLE_COLORS[role], opacity:0.75 }}></div>
+                ))}
+              </div>
+              <div style={{ display:"flex", gap:14, marginTop:10, flexWrap:"wrap" }}>
+                {SEAT_DATA.map(({ role }) => (
+                  <div key={role} style={{ display:"flex", alignItems:"center", gap:5 }}>
+                    <div style={{ width:8, height:8, borderRadius:1, background:ROLE_COLORS[role], opacity:0.75 }}></div>
+                    <span style={{ fontSize:9, color:"#6e7681" }}>{role}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
